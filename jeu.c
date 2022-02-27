@@ -9,13 +9,19 @@
 #include <stdlib.h>
 #include <math.h>
 #include <time.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <unistd.h>
+#include <limits.h>
 
 // Paramètres du jeu
 #define LARGEUR_MAX 7		// nb max de fils pour un noeud (= nb max de coups possibles)
 #define TEMPS 5		// temps de calcul pour un coup avec MCTS (en secondes)
 #define LARGEUR 7
 #define HAUTEUR 6
-
+#define STATS 1              // affichage des statistiques du dernier coup
+#define AMELIORE 0           // simulation améliorée
+#define STRATEGIE 0           // mode : robuste ou max
 // macros
 #define AUTRE_JOUEUR(i) (1-(i))
 #define min(a, b)       ((a) < (b) ? (a) : (b))
@@ -26,10 +32,8 @@ typedef enum {NON, MATCHNUL, ORDI_GAGNE, HUMAIN_GAGNE } FinDePartie;
 
 // Definition du type Etat (état/position du jeu)
 typedef struct EtatSt {
-
-	int joueur; // à qui de jouer ?
+	int joueur; // 0:joueur,1:ordinateur
 	char plateau[HAUTEUR][LARGEUR];	
-
 } Etat;
 
 // Definition du type Coup
@@ -44,18 +48,12 @@ Etat * copieEtat( Etat * src ) {
 	Etat * etat = (Etat *)malloc(sizeof(Etat));
 
 	etat->joueur = src->joueur;
-	
-		
-	// TODO: à compléter avec la copie de l'état src dans etat
-	
-	/* par exemple : */
+
 	int i,j;	
 	for (i=0; i< HAUTEUR; i++)
 		for ( j=0; j<LARGEUR; j++)
 			etat->plateau[i][j] = src->plateau[i][j];
-	
-
-	
+		
 	return etat;
 }
 
@@ -137,8 +135,6 @@ int jouerCoup( Etat * etat, Coup * coup ) {
 Coup ** coups_possibles( Etat * etat ) {
 	Coup ** coups = (Coup **) malloc((1+LARGEUR_MAX) * sizeof(Coup *) );	
 	int k = 0;
-	
-	// TODO: à compléter
 	
 	/* par exemple */
 	int i,j;
@@ -232,8 +228,6 @@ void freeNoeud ( Noeud * noeud) {
 // Test si l'état est un état terminal 
 // et retourne NON, MATCHNUL, ORDI_GAGNE ou HUMAIN_GAGNE
 FinDePartie testFin( Etat * etat ) {
-
-	// TODO...
 	
 	/* par exemple	*/
 	
@@ -281,6 +275,11 @@ FinDePartie testFin( Etat * etat ) {
 	return NON;
 }
 
+int strategie;
+int amelioration;
+int tempsMax;
+int statistique;
+
 
 
 // Calcule et joue un coup de l'ordinateur avec MCTS-UCT
@@ -310,14 +309,13 @@ void ordijoue_mcts(Etat * etat, int tempsmax) {
 	int iter = 0;	
 
     do {
-        // Selectioner le noeud avec la plus grande B-Valeur recurcivement jusqu'a un fils sans B-valeur
+		//1. Sélectionner récursivement à partir de la racine le nœud avec la plus grande B-valeur jusqu’à un nœud terminal ou un avec un fils non développ
         float maxBvaleur = 0;
         Noeud *noeudMaxBvaleur;
         bool trouve = false;
         Noeud *noeudCourant = racine;
-        Noeud *enfantsTrouve[LARGEUR_MAX];
+        Noeud *noeudSansSimulation[LARGEUR_MAX];
         int nbEnfantsTrouve = 0;
-
 		int a = 1;
 		// tant que on n'a pas trouvé de noeud a exploré on cherche recursivement
         while(!trouve){
@@ -332,24 +330,25 @@ void ordijoue_mcts(Etat * etat, int tempsmax) {
                     // et trouvé = true
                     if (noeudEnfantCourant->nb_simus == 0) {
                         trouve = true;
-                        enfantsTrouve[nbEnfantsTrouve] = noeudEnfantCourant;
+                        noeudSansSimulation[nbEnfantsTrouve] = noeudEnfantCourant;
                         nbEnfantsTrouve++;
                     } else {
-                        // sinon on calcule la bvaleur de tout les fils et on sauvegarde le meilleur noeud
+                        // sinon on calcule la B-valeur de tout les fils et on sauvegarde le meilleur noeud
                         float muI = (float) noeudEnfantCourant->nb_victoires / (float) noeudEnfantCourant->nb_simus;
+						//± : alternance des joueurs, + si parent(i) est un nœud Max, − si Min,si joueur on fait min
                         if (noeudEnfantCourant->joueur == 0){
                             muI = -muI;
                         }
-                        float Bvaleur =
-                                muI + sqrt(2) * sqrt(log(noeudCourant->nb_simus) / noeudEnfantCourant->nb_simus);
+						//calculer B-valeur,c= sqrt(2)
+                        float Bvaleur = muI + sqrt(2) * sqrt(log(noeudCourant->nb_simus) / noeudEnfantCourant->nb_simus);
 						if (Bvaleur > maxBvaleur) {
 							maxBvaleur = Bvaleur;
                             noeudMaxBvaleur = noeudEnfantCourant;
                         }
                     }
                 }
-                // si on a pas trouvé de fils sans simulation on prend celui avec la meilleur Bvaleur
-                // on cree alors tout ses fils si il n'en a pas
+                // si on n'a pas trouvé de fils(noeud) sans simulation on prend celui avec la meilleur Bvaleur
+				// on cree alors tout ses fils si il n'en a pas
                 if (!trouve) {
                     noeudCourant = noeudMaxBvaleur;
                     if (noeudCourant->nb_enfants == 0) {
@@ -361,34 +360,37 @@ void ordijoue_mcts(Etat * etat, int tempsmax) {
                         }
                     }
                 }
-            }else{
-                enfantsTrouve[nbEnfantsTrouve] = noeudCourant;
+            }else{ //// si le noeud actuel n'est pas final,on l'ajoute à la liste des noeud a simulé
+                noeudSansSimulation[nbEnfantsTrouve] = noeudCourant;
                 nbEnfantsTrouve++;
                 trouve = true;
             }
         }
 
+		//3.Simulation aléatoire de la fin de la partie pour obtenir la récompense r
+
+
         // avec les fils sans B-Valeur => en choisir un aleatoirement
-        Noeud *noeudChoisi = enfantsTrouve[rand() % nbEnfantsTrouve];
+        Noeud *noeudChoisi = noeudSansSimulation[rand() % nbEnfantsTrouve];
 
         //simuler une partie aléatoire
-        Etat *etatDepart = duplicateState(noeudChoisi->etat);
-
-        // on ne prend pas un coup gagnant si il y en a un
-		if (amelioration == AMELIORE) {
+        Etat *etatDepart = copieEtat(noeudChoisi->etat);
+		Coup **coupPossible ;
+		
+        //on ne prend pas un coup gagnant si il y en a un
+		if (amelioration == AMELIORE) { //sans améliorer
 			while(testFin(etatDepart) == NON){
-				Coup **coupsDePartie = coups_possibles(etatDepart);
+				coupPossible= coups_possibles(etatDepart);
 				int nbCoups = 0;
-				while (coupsDePartie[nbCoups] != NULL) {
+				while (coupPossible[nbCoups] != NULL) {
 					nbCoups++;
 				}
-				Coup* coupChoisi = coupsDePartie[rand() % nbCoups];
+				Coup* coupChoisi = coupPossible[rand() % nbCoups];//chosit aléatoire une possible
 				jouerCoup(etatDepart, coupChoisi);
-			}
-		
-	
-		} else { //avec amélioration
-			Etat *etatFuture = duplicateState(etatDepart);
+				free(coupPossible);
+			}	
+		}/*else { //avec amélioration
+			Etat *etatFuture = copieEtat(etatDepart);
 			bool etatFuturEstFinal = false;
 			while(testFin(etatDepart) == NON){
 				etatFuturEstFinal = false;
@@ -399,7 +401,7 @@ void ordijoue_mcts(Etat * etat, int tempsmax) {
 				}
 				//simulation de coup suivant pour choisir forcement le coup gagnant si il existe
 				for (int i = 0; i < nbCoups; i++) {
-					etatFuture = duplicateState(etatDepart);
+					etatFuture = copieEtat(etatDepart);
 					jouerCoup(etatFuture, coupsDePartie[i]);
 					if (testFin(etatFuture) == DEFAITE){
 						etatFuturEstFinal = true;
@@ -412,16 +414,17 @@ void ordijoue_mcts(Etat * etat, int tempsmax) {
 					jouerCoup(etatDepart, coupChoisi);
 				}
 			}
-		}
+		}*/
 
+		// 4. Mise à jour des N et µ sur tout le chemin de C3 à la racine
         // remonter la valeur sur tout les neuds parcouru jusqu'a la racine
         FinDePartie resultat = testFin(etatDepart);
-        noeudCourant = noeudChoisi;
+        noeudCourant = noeudChoisi;// à partir du neoud on choisit
         while(noeudCourant != NULL){
-            if (resultat == DEFAITE){
-                noeudCourant->nb_victoires += 1;
+            if (resultat == ORDI_GAGNE){
+                noeudCourant->nb_victoires ++;
             }
-            if (resultat == NUL){
+            if (resultat == MATCHNUL){
                 noeudCourant->nb_victoires += 0.5f;
             }
             noeudCourant->nb_simus++;
@@ -437,6 +440,7 @@ void ordijoue_mcts(Etat * etat, int tempsmax) {
     } while (temps < tempsmax);
 
     //fin de l'algorithme
+	//on parcours les noeuds fils de la rachine
     int maxN = 0;
     for (int j = 0; j < racine->nb_enfants; j++) {
 		int nb;
@@ -450,7 +454,13 @@ void ordijoue_mcts(Etat * etat, int tempsmax) {
 
     // Jouer le meilleur premier coup
     jouerCoup(etat, meilleur_coup);
-	
+
+	if(statistique == STATS) {
+        printf("\nSTATISTIQUES :\n");
+		printf("Nombre de simulations réalisées : %d\n", iter);
+		printf("Probabilité de victoire pour l'ordinateur : %.2f \n", racine->nb_victoires/(float)racine->nb_simus);
+	}
+
 	// Penser à libérer la mémoire :
 	freeNoeud(racine);
 	free (coups);
@@ -467,6 +477,18 @@ int main(void) {
 	// Choisir qui commence : 
 	printf("Qui commence (0 : humain, 1 : ordinateur) ? ");
 	scanf("%d", &(etat->joueur) );
+    printf("Q1 ) Affichage des statistiques du dernier coup -> Oui : 1 // Non : 0  :  ");
+    scanf("%d", &statistique);
+    
+    printf("Q2 ) Temps de calcul en secondes par coup de l'ordinateur  :  ");
+    scanf("%d", &tempsMax);
+
+    printf("Q3 ) Simulation améliorée -> Oui : 1 // Non : 0  :  ");
+    scanf("%d", &amelioration);
+
+    printf("Q5 ) Stratégie -> Robuste : 0 // Max : 1  :  ");
+    scanf("%d", &strategie);
+
 	
 	// boucle de jeu
 	do {
@@ -484,7 +506,7 @@ int main(void) {
 		}
 		else {
 			// tour de l'Ordinateur
-			ordijoue_mcts( etat, TEMPS );
+			ordijoue_mcts( etat, tempsMax );
 			
 		}
 		
