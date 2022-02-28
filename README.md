@@ -5,3 +5,6 @@ Le but du projet est de créer un programme qui exécute le jeu puissance 4 avec
 ```sh
 git clone https://github.com/ge8u/MCTS.git
 gcc -O3 jeu.c -o jeu
+```
+## exécution
+./jeu
